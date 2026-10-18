@@ -104,7 +104,7 @@ export default function PoolDetail() {
     const closeAnimation = () => setAnimPhase("idle");
 
     const openLightbox = (url, name) => {
-        if (url) setLightbox({ url: `imgSrc(url)`, name });
+        if (url) setLightbox({ url: imgSrc(url), name });
     };
 
     if (loading) return <div className="text-center py-20 text-pink-300">載入中...</div>;
@@ -196,7 +196,7 @@ export default function PoolDetail() {
                                             >
                                                 {r.image_url ? (
                                                     <img
-                                                        src={`imgSrc(r.image_url)`}
+                                                        src={imgSrc(r.image_url)}
                                                         alt={r.name}
                                                         className="w-full h-full object-cover"
                                                     />
@@ -242,7 +242,7 @@ export default function PoolDetail() {
                                         >
                                             <div className="aspect-[3/4] rounded-lg overflow-hidden border border-pink-500/50">
                                                 {r.image_url ? (
-                                                    <img src={`imgSrc(r.image_url)`} alt={r.name} className="w-full h-full object-cover" />
+                                                    <img src={imgSrc(r.image_url)} alt={r.name} className="w-full h-full object-cover" />
                                                 ) : (
                                                     <div className="w-full h-full flex items-center justify-center bg-dark-900 text-3xl">🎴</div>
                                                 )}
@@ -272,7 +272,7 @@ export default function PoolDetail() {
                 <div>
                     <div className="aspect-square rounded-2xl overflow-hidden bg-dark-800 border border-pink-900/30">
                         {pool.image_url ? (
-                            <img src={`imgSrc(pool.image_url)`} alt={pool.name} className="w-full h-full object-cover" />
+                            <img src={imgSrc(pool.image_url)} alt={pool.name} className="w-full h-full object-cover" />
                         ) : (
                             <div className="w-full h-full flex items-center justify-center text-6xl text-gray-600">🎴</div>
                         )}
@@ -337,7 +337,7 @@ export default function PoolDetail() {
                             >
                                 <div className="aspect-square bg-dark-900">
                                     {r.image_url ? (
-                                        <img src={`imgSrc(r.image_url)`} alt={r.name} className="w-full h-full object-cover" />
+                                        <img src={imgSrc(r.image_url)} alt={r.name} className="w-full h-full object-cover" />
                                     ) : (
                                         <div className="w-full h-full flex items-center justify-center text-3xl">🎴</div>
                                     )}
@@ -364,7 +364,7 @@ export default function PoolDetail() {
                             >
                                 <div className="aspect-square bg-dark-900">
                                     {c.image_url ? (
-                                        <img src={`imgSrc(c.image_url)`} alt={c.name} className="w-full h-full object-cover opacity-80" />
+                                        <img src={imgSrc(c.image_url)} alt={c.name} className="w-full h-full object-cover opacity-80" />
                                     ) : (
                                         <div className="w-full h-full flex items-center justify-center text-2xl text-gray-600">🎴</div>
                                     )}

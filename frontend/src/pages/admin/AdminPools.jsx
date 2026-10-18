@@ -306,7 +306,7 @@ export default function AdminPools() {
                 {pools.map((p, index) => (
                     <div key={p.id} className="bg-dark-800/60 rounded-xl p-4 border border-purple-900/20 flex flex-wrap items-center gap-4">
                         {p.image_url ? (
-                            <img src={`imgSrc(p.image_url)`} alt="" className="w-16 h-16 object-cover rounded-lg" />
+                            <img src={imgSrc(p.image_url)} alt="" className="w-16 h-16 object-cover rounded-lg" />
                         ) : (
                             <div className="w-16 h-16 bg-dark-900 rounded-lg flex items-center justify-center text-2xl">🎴</div>
                         )}

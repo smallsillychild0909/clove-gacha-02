@@ -44,7 +44,7 @@ export default function Home() {
               <div className="aspect-[4/3] bg-dark-900 relative overflow-hidden">
                 {pool.image_url ? (
                   <img
-                    src={`imgSrc(pool.image_url)`}
+                    src={imgSrc(pool.image_url)}
                     alt={pool.name}
                     className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                   />

@@ -423,11 +423,11 @@ export default function AdminPoolCards() {
                 <td className="py-2 pr-4">
                   {c.image_url ? (
                     <img
-                      src={`imgSrc(c.image_url)`}
+                      src={imgSrc(c.image_url)}
                       alt={c.name}
                       className="w-12 h-12 object-cover rounded cursor-pointer hover:opacity-80 transition"
                       title="雙擊查看大圖"
-                      onDoubleClick={() => setPreviewImage(`imgSrc(c.image_url)`)}
+                      onDoubleClick={() => setPreviewImage(imgSrc(c.image_url))}
                     />
                   ) : (
                     "—"
