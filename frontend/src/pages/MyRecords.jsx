@@ -1,7 +1,7 @@
+import { imgSrc } from "../utils/image";
 import { useEffect, useState } from "react";
 import api from "../api/client";
 
-import { imgSrc } from "../utils/image";
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
 export default function MyRecords() {
@@ -42,7 +42,7 @@ export default function MyRecords() {
               <div className="flex flex-wrap gap-2">
                 {(r.results || []).map((c, i) => (
                   <div key={i} className="flex items-center gap-2 bg-dark-900 rounded-lg px-2 py-1 text-sm">
-                    {c.image_url && <img src={imgSrc(c.image_url)} alt="" className="w-8 h-8 object-cover rounded" />}
+                    {c.image_url && <img src={`imgSrc(c.image_url)`} alt="" className="w-8 h-8 object-cover rounded" />}
                     <span>{c.name}</span>
                   </div>
                 ))}

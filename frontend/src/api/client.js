@@ -71,6 +71,13 @@ export const api = {
   myTransactions: () => request("/api/my/transactions"),
   recharge: (body) => request("/api/recharge", { method: "POST", body: JSON.stringify(body) }),
 
+  // 第三方支付
+  paymentMethods: () => request("/api/payments/methods"),
+  createPayment: (body) => request("/api/payments/create", { method: "POST", body: JSON.stringify(body) }),
+  confirmPayment: (orderNo, sessionId) =>
+    request(`/api/payments/confirm?order_no=${encodeURIComponent(orderNo)}&session_id=${encodeURIComponent(sessionId || "")}`, { method: "POST" }),
+  myPaymentOrders: () => request("/api/payments/orders"),
+
   adminCreatePool: (formData) => request("/api/admin/pools", { method: "POST", body: formData }),
   adminUpdatePool: (id, formData) => request(`/api/admin/pools/${id}`, { method: "PUT", body: formData }),
   adminAddCard: (poolId, formData) => request(`/api/admin/pools/${poolId}/cards`, { method: "POST", body: formData }),
@@ -84,6 +91,8 @@ export const api = {
   adminUpdateCard: (cardId, formData) => request(`/api/admin/cards/${cardId}`, { method: "PUT", body: formData }),
   adminDeleteCard: (cardId) => request(`/api/admin/cards/${cardId}`, { method: "DELETE" }),
   adminDeletePool: (poolId) => request(`/api/admin/pools/${poolId}`, { method: "DELETE" }),
+  adminMovePool: (poolId, direction) =>
+    request(`/api/admin/pools/${poolId}/move?direction=${direction}`, { method: "POST" }),
 };
 
 export default api;

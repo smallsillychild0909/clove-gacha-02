@@ -4,7 +4,8 @@ import random
 import uuid
 from pathlib import Path
 from typing import Optional, List
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Query
+from datetime import datetime
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
@@ -14,20 +15,32 @@ from auth import (
     get_current_user, require_admin, require_member
 )
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent / ".env")
+except ImportError:
+    pass
+
+try:
+    import stripe
+except ImportError:
+    stripe = None
+
 # 初始化
 init_db()
 
 UPLOAD_DIR = Path(__file__).parent.parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-# Supabase Storage 設定（有設定就上傳到雲端，否則存本機）
+# Supabase Storage（有設定就上傳雲端，否則存本機）
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "gacha-images")
 
-def save_image(file: UploadFile, prefix: str = "img") -> str:
-    """儲存上傳圖片。優先存 Supabase Storage，否則存本機 uploads/。回傳可公開存取的 URL。"""
-    ext = Path(file.filename or "").suffix.lower() or ".jpg"
+def save_image(file, prefix: str = "img") -> str:
+    """儲存上傳圖片。優先 Supabase Storage，否則本機 uploads/。"""
+    from pathlib import Path as _P
+    ext = _P(getattr(file, "filename", "") or "").suffix.lower() or ".jpg"
     if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
         ext = ".jpg"
     filename = f"{prefix}_{uuid.uuid4().hex}{ext}"
@@ -37,17 +50,17 @@ def save_image(file: UploadFile, prefix: str = "img") -> str:
         try:
             import httpx
         except ImportError:
-            raise HTTPException(500, "請安裝 httpx：pip install httpx")
+            raise HTTPException(500, "請安裝 httpx")
         url = f"{SUPABASE_URL}/storage/v1/object/{SUPABASE_BUCKET}/{filename}"
         headers = {
             "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
             "apikey": SUPABASE_SERVICE_KEY,
-            "Content-Type": file.content_type or "image/jpeg",
+            "Content-Type": getattr(file, "content_type", None) or "image/jpeg",
             "x-upsert": "true",
         }
         resp = httpx.post(url, content=content, headers=headers, timeout=60)
         if resp.status_code not in (200, 201):
-            raise HTTPException(500, f"圖片上傳到 Supabase 失敗 ({resp.status_code}): {resp.text[:200]}")
+            raise HTTPException(500, f"圖片上傳失敗 ({resp.status_code}): {resp.text[:200]}")
         return f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{filename}"
     else:
         filepath = UPLOAD_DIR / filename
@@ -55,9 +68,17 @@ def save_image(file: UploadFile, prefix: str = "img") -> str:
             f.write(content)
         return f"/uploads/{filename}"
 
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173").rstrip("/")
+POINTS_PER_CURRENCY = float(os.getenv("POINTS_PER_CURRENCY", "1"))
+PAYMENT_CURRENCY = os.getenv("PAYMENT_CURRENCY", "TWD")
+
+if stripe and STRIPE_SECRET_KEY:
+    stripe.api_key = STRIPE_SECRET_KEY
+
 app = FastAPI(title="Clove 抽卡平台 API", version="1.0.0")
 
-# 允許的前端來源（可用環境變數覆寫，逗號分隔）
 _default_origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -66,7 +87,6 @@ _default_origins = [
 ]
 _env_origins = os.getenv("CORS_ORIGINS", "")
 allow_origins = _default_origins + [o.strip() for o in _env_origins.split(",") if o.strip()]
-# 開發/展示可允許所有（正式環境建議明確列出）
 if os.getenv("CORS_ALLOW_ALL", "").lower() in ("1", "true", "yes"):
     allow_origins = ["*"]
 
@@ -172,13 +192,18 @@ def me(user: dict = Depends(get_current_user)):
 @app.get("/api/pools")
 def list_pools(active_only: bool = True):
     conn = get_db()
+    # 前台與後台共用 sort_order，數字越小越前面
     if active_only:
         rows = conn.execute(
-            "SELECT id, name, description, image_url, intro_type, cost_single, cost_ten, total_quantity, remaining_quantity, is_active FROM pools WHERE is_active = 1 ORDER BY id DESC"
+            """SELECT id, name, description, image_url, intro_type, cost_single, cost_ten,
+                      total_quantity, remaining_quantity, is_active, sort_order
+               FROM pools WHERE is_active = 1 ORDER BY sort_order ASC, id ASC"""
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT id, name, description, image_url, intro_type, cost_single, cost_ten, total_quantity, remaining_quantity, is_active FROM pools ORDER BY id DESC"
+            """SELECT id, name, description, image_url, intro_type, cost_single, cost_ten,
+                      total_quantity, remaining_quantity, is_active, sort_order
+               FROM pools ORDER BY sort_order ASC, id ASC"""
         ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -331,7 +356,7 @@ def my_transactions(user: dict = Depends(require_member), limit: int = 50):
     conn.close()
     return [dict(r) for r in rows]
 
-# ==================== 會員自行儲值（模擬） ====================
+# ==================== 會員自行儲值（模擬，本機測試用） ====================
 
 @app.post("/api/recharge")
 def member_recharge(req: RechargeRequest, user: dict = Depends(require_member)):
@@ -342,11 +367,266 @@ def member_recharge(req: RechargeRequest, user: dict = Depends(require_member)):
     conn.execute("UPDATE users SET points = ? WHERE id = ?", (new_points, user["id"]))
     conn.execute(
         "INSERT INTO transactions (user_id, type, amount, balance_after, note) VALUES (?, 'recharge', ?, ?, ?)",
-        (user["id"], req.amount, new_points, req.note or "會員自行儲值")
+        (user["id"], req.amount, new_points, req.note or "會員自行儲值（模擬）")
     )
     conn.commit()
     conn.close()
     return {"success": True, "new_points": new_points}
+
+
+# ==================== 第三方支付（Stripe：刷卡 / Apple Pay / Google Pay / 微信 / 支付寶） ====================
+
+METHOD_LABELS = {
+    "card": "信用卡 / 簽帳卡",
+    "apple_pay": "Apple Pay",
+    "google_pay": "Google Pay",
+    "wechat": "微信支付",
+    "alipay": "支付寶",
+    "mock": "模擬儲值",
+}
+
+# Stripe Checkout 支援的 payment_method_types
+STRIPE_METHOD_MAP = {
+    "card": ["card"],
+    "apple_pay": ["card"],       # Stripe 會自動顯示 Apple Pay
+    "google_pay": ["card"],      # Stripe 會自動顯示 Google Pay
+    "wechat": ["wechat_pay"],
+    "alipay": ["alipay"],
+}
+
+
+class CreatePaymentRequest(BaseModel):
+    amount: int                  # 要買的遊戲幣點數
+    method: str = "card"         # card / apple_pay / google_pay / wechat / alipay
+
+
+def _credit_order(conn, order: dict, payment_id: str | None = None) -> int:
+    """把訂單點數入帳（冪等：已 paid 不再加）"""
+    if order["status"] == "paid":
+        user = conn.execute("SELECT points FROM users WHERE id = ?", (order["user_id"],)).fetchone()
+        return user["points"] if user else 0
+
+    user = conn.execute("SELECT * FROM users WHERE id = ?", (order["user_id"],)).fetchone()
+    if not user:
+        raise HTTPException(404, "使用者不存在")
+
+    new_points = user["points"] + order["amount_points"]
+    conn.execute("UPDATE users SET points = ? WHERE id = ?", (new_points, user["id"]))
+    conn.execute(
+        """UPDATE payment_orders
+           SET status = 'paid', provider_payment_id = COALESCE(?, provider_payment_id),
+               paid_at = datetime('now','localtime')
+           WHERE id = ?""",
+        (payment_id, order["id"])
+    )
+    label = METHOD_LABELS.get(order["method"], order["method"])
+    conn.execute(
+        """INSERT INTO transactions (user_id, type, amount, balance_after, note)
+           VALUES (?, 'payment', ?, ?, ?)""",
+        (user["id"], order["amount_points"], new_points,
+         f"{label} 儲值 {order['amount_money']} {order['currency']} · 訂單 {order['order_no']}")
+    )
+    return new_points
+
+
+@app.get("/api/payments/methods")
+def payment_methods():
+    """回傳可用支付方式（前端用來顯示按鈕）"""
+    stripe_ready = bool(stripe and STRIPE_SECRET_KEY)
+    methods = [
+        {"id": "card", "name": "信用卡 / 簽帳卡", "enabled": stripe_ready},
+        {"id": "apple_pay", "name": "Apple Pay", "enabled": stripe_ready},
+        {"id": "google_pay", "name": "Google Pay", "enabled": stripe_ready},
+        {"id": "wechat", "name": "微信支付", "enabled": stripe_ready},
+        {"id": "alipay", "name": "支付寶", "enabled": stripe_ready},
+        {"id": "mock", "name": "模擬儲值（本機測試）", "enabled": True},
+    ]
+    return {
+        "methods": methods,
+        "currency": PAYMENT_CURRENCY,
+        "points_per_currency": POINTS_PER_CURRENCY,
+        "stripe_configured": stripe_ready,
+    }
+
+
+@app.post("/api/payments/create")
+def create_payment(req: CreatePaymentRequest, user: dict = Depends(require_member)):
+    """建立支付訂單。mock 直接入帳；其餘走 Stripe Checkout。"""
+    if req.amount <= 0:
+        raise HTTPException(400, "儲值點數必須大於 0")
+    method = req.method.lower()
+    if method not in METHOD_LABELS:
+        raise HTTPException(400, "不支援的支付方式")
+
+    amount_money = round(req.amount / POINTS_PER_CURRENCY, 2)
+    order_no = f"CL{datetime.now().strftime('%Y%m%d%H%M%S')}{uuid.uuid4().hex[:6].upper()}"
+
+    conn = get_db()
+    cur = conn.execute(
+        """INSERT INTO payment_orders
+           (user_id, order_no, provider, method, amount_points, amount_money, currency, status, note)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
+        (user["id"], order_no, "mock" if method == "mock" else "stripe",
+         method, req.amount, amount_money, PAYMENT_CURRENCY,
+         METHOD_LABELS.get(method, method))
+    )
+    order_id = cur.lastrowid
+    conn.commit()
+
+    # 模擬儲值：直接入帳
+    if method == "mock":
+        order = dict(conn.execute("SELECT * FROM payment_orders WHERE id = ?", (order_id,)).fetchone())
+        new_points = _credit_order(conn, order, "mock")
+        conn.commit()
+        conn.close()
+        return {
+            "success": True,
+            "mode": "mock",
+            "order_no": order_no,
+            "new_points": new_points,
+            "message": "模擬儲值成功",
+        }
+
+    # 真實金流
+    if not stripe or not STRIPE_SECRET_KEY:
+        conn.close()
+        raise HTTPException(400, "尚未設定 Stripe 金鑰，請先設定 .env 的 STRIPE_SECRET_KEY，或改用模擬儲值")
+
+    pm_types = STRIPE_METHOD_MAP.get(method, ["card"])
+    # Stripe 金額單位：零小數幣別用原值，否則 *100
+    zero_decimal = PAYMENT_CURRENCY.upper() in {"JPY", "KRW", "TWD", "VND"}
+    unit_amount = int(round(amount_money)) if zero_decimal else int(round(amount_money * 100))
+
+    try:
+        session = stripe.checkout.Session.create(
+            mode="payment",
+            payment_method_types=pm_types,
+            line_items=[{
+                "price_data": {
+                    "currency": PAYMENT_CURRENCY.lower(),
+                    "product_data": {
+                        "name": f"遊戲幣 {req.amount} pt",
+                        "description": f"訂單 {order_no}",
+                    },
+                    "unit_amount": unit_amount,
+                },
+                "quantity": 1,
+            }],
+            success_url=f"{FRONTEND_URL}/recharge?status=success&order_no={order_no}&session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{FRONTEND_URL}/recharge?status=cancel&order_no={order_no}",
+            metadata={
+                "order_no": order_no,
+                "user_id": str(user["id"]),
+                "points": str(req.amount),
+            },
+            client_reference_id=order_no,
+        )
+    except Exception as e:
+        conn.close()
+        raise HTTPException(400, f"建立支付失敗：{e}")
+
+    conn.execute(
+        "UPDATE payment_orders SET provider_session_id = ? WHERE id = ?",
+        (session.id, order_id)
+    )
+    conn.commit()
+    conn.close()
+    return {
+        "success": True,
+        "mode": "redirect",
+        "order_no": order_no,
+        "checkout_url": session.url,
+        "session_id": session.id,
+    }
+
+
+@app.post("/api/payments/confirm")
+def confirm_payment(order_no: str = Query(...), session_id: str = Query(""), user: dict = Depends(require_member)):
+    """付款成功導回後呼叫，向 Stripe 確認並入帳（冪等）"""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM payment_orders WHERE order_no = ? AND user_id = ?",
+        (order_no, user["id"])
+    ).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, "訂單不存在")
+    order = dict(row)
+
+    if order["status"] == "paid":
+        u = conn.execute("SELECT points FROM users WHERE id = ?", (user["id"],)).fetchone()
+        conn.close()
+        return {"success": True, "already_paid": True, "new_points": u["points"], "order_no": order_no}
+
+    if order["provider"] != "stripe":
+        conn.close()
+        raise HTTPException(400, "此訂單不是線上支付")
+
+    if not stripe or not STRIPE_SECRET_KEY:
+        conn.close()
+        raise HTTPException(400, "Stripe 未設定")
+
+    sid = session_id or order.get("provider_session_id") or ""
+    if not sid:
+        conn.close()
+        raise HTTPException(400, "缺少付款工作階段 ID")
+
+    try:
+        session = stripe.checkout.Session.retrieve(sid)
+    except Exception as e:
+        conn.close()
+        raise HTTPException(400, f"查詢付款狀態失敗：{e}")
+
+    if session.payment_status != "paid":
+        conn.close()
+        raise HTTPException(400, f"付款尚未完成（狀態：{session.payment_status}）")
+
+    new_points = _credit_order(conn, order, session.payment_intent)
+    conn.commit()
+    conn.close()
+    return {"success": True, "new_points": new_points, "order_no": order_no}
+
+
+@app.post("/api/payments/webhook")
+async def stripe_webhook(request: Request):
+    """Stripe Webhook（正式環境建議用這個入帳，比前端 confirm 更可靠）"""
+    if not stripe or not STRIPE_SECRET_KEY:
+        raise HTTPException(400, "Stripe 未設定")
+    payload = await request.body()
+    sig = request.headers.get("stripe-signature", "")
+
+    if STRIPE_WEBHOOK_SECRET:
+        try:
+            event = stripe.Webhook.construct_event(payload, sig, STRIPE_WEBHOOK_SECRET)
+        except Exception as e:
+            raise HTTPException(400, f"Webhook 驗證失敗：{e}")
+    else:
+        # 未設 webhook secret 時僅供本機除錯，正式環境務必設定
+        event = json.loads(payload)
+
+    if event.get("type") == "checkout.session.completed":
+        session = event["data"]["object"]
+        order_no = (session.get("metadata") or {}).get("order_no") or session.get("client_reference_id")
+        if order_no and session.get("payment_status") == "paid":
+            conn = get_db()
+            row = conn.execute("SELECT * FROM payment_orders WHERE order_no = ?", (order_no,)).fetchone()
+            if row and row["status"] != "paid":
+                _credit_order(conn, dict(row), session.get("payment_intent"))
+                conn.commit()
+            conn.close()
+    return {"received": True}
+
+
+@app.get("/api/payments/orders")
+def my_payment_orders(user: dict = Depends(require_member), limit: int = 30):
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT order_no, method, amount_points, amount_money, currency, status, created_at, paid_at
+           FROM payment_orders WHERE user_id = ? ORDER BY id DESC LIMIT ?""",
+        (user["id"], limit)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 # ==================== 管理控台 ====================
 
@@ -369,10 +649,14 @@ def admin_create_pool(
         image_url = save_image(image, "pool")
 
     conn = get_db()
+    # 新獎池排在最後
+    max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) as m FROM pools").fetchone()["m"]
     cur = conn.execute(
-        """INSERT INTO pools (name, description, image_url, intro_type, cost_single, cost_ten, total_quantity, remaining_quantity)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (name, description, image_url, intro_type, cost_single, cost_ten, total_quantity, total_quantity)
+        """INSERT INTO pools (name, description, image_url, intro_type, cost_single, cost_ten,
+                              total_quantity, remaining_quantity, sort_order)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (name, description, image_url, intro_type, cost_single, cost_ten,
+         total_quantity, total_quantity, max_order + 1)
     )
     conn.commit()
     pool_id = cur.lastrowid
@@ -444,6 +728,40 @@ def admin_update_pool(
         conn.commit()
     conn.close()
     return {"message": "更新成功"}
+
+
+@app.post("/api/admin/pools/{pool_id}/move")
+def admin_move_pool(pool_id: int, direction: str = Query(..., description="up 往前 / down 往後"),
+                    admin: dict = Depends(require_admin)):
+    """與相鄰獎池交換順序。立即寫入，前台獎池列表會同步。"""
+    if direction not in ("up", "down"):
+        raise HTTPException(400, "direction 必須是 up 或 down")
+
+    conn = get_db()
+    pools = [dict(r) for r in conn.execute(
+        "SELECT id, sort_order FROM pools ORDER BY sort_order ASC, id ASC"
+    ).fetchall()]
+    idx = next((i for i, p in enumerate(pools) if p["id"] == pool_id), None)
+    if idx is None:
+        conn.close()
+        raise HTTPException(404, "獎池不存在")
+
+    swap_with = idx - 1 if direction == "up" else idx + 1
+    if swap_with < 0 or swap_with >= len(pools):
+        conn.close()
+        return {"message": "已在最前" if direction == "up" else "已在最後", "moved": False}
+
+    # 重新編成連續序號後交換，避免舊資料 sort_order 重複
+    ordered = [p["id"] for p in pools]
+    ordered[idx], ordered[swap_with] = ordered[swap_with], ordered[idx]
+    for i, pid in enumerate(ordered):
+        conn.execute("UPDATE pools SET sort_order = ? WHERE id = ?", (i, pid))
+    conn.commit()
+    conn.close()
+    return {"message": "排序已更新", "moved": True}
+
+
+# ==================== 管理控台 卡面 ====================
 
 @app.post("/api/admin/pools/{pool_id}/cards")
 def admin_add_card(

@@ -1,8 +1,8 @@
+import { imgSrc } from "../utils/image";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import api from "../api/client";
 
-import { imgSrc } from "../utils/image";
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
 export default function Home() {
@@ -24,7 +24,7 @@ export default function Home() {
     <div>
       <div className="text-center mb-10">
         <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-pink-400 via-purple-400 to-pink-400 bg-clip-text text-transparent mb-2">
-          活動獎池
+          抽獎池
         </h1>
         <p className="text-gray-400">選擇你想挑戰的卡池，試試手氣！</p>
       </div>
@@ -44,7 +44,7 @@ export default function Home() {
               <div className="aspect-[4/3] bg-dark-900 relative overflow-hidden">
                 {pool.image_url ? (
                   <img
-                    src={imgSrc(pool.image_url)}
+                    src={`imgSrc(pool.image_url)`}
                     alt={pool.name}
                     className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                   />

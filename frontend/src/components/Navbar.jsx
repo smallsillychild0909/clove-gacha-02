@@ -38,7 +38,7 @@ export default function Navbar() {
               <Link to="/register" className="px-3 py-1 rounded bg-pink-600 hover:bg-pink-500 transition">
                 註冊
               </Link>
-              <Link to="/admin/login" className="text-xs text-gray-500 hover:text-gray-300">管理員</Link>
+              {/* 已移除「管理員」連結 */}
             </>
           )}
         </div>

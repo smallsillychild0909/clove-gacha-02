@@ -1,8 +1,8 @@
+import { imgSrc } from "../../utils/image";
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import api from "../../api/client";
 
-import { imgSrc } from "../../utils/image";
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
 function formatProb(p) {
@@ -423,11 +423,11 @@ export default function AdminPoolCards() {
                 <td className="py-2 pr-4">
                   {c.image_url ? (
                     <img
-                      src={imgSrc(c.image_url)}
+                      src={`imgSrc(c.image_url)`}
                       alt={c.name}
                       className="w-12 h-12 object-cover rounded cursor-pointer hover:opacity-80 transition"
                       title="雙擊查看大圖"
-                      onDoubleClick={() => setPreviewImage(imgSrc(c.image_url))}
+                      onDoubleClick={() => setPreviewImage(`imgSrc(c.image_url)`)}
                     />
                   ) : (
                     "—"
